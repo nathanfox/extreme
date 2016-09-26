@@ -21,21 +21,21 @@ defmodule Extreme do
   - {:error, error_reason, protobuf_message} on failure.
   """
   def execute(server, message) do
-    GenServer.call server, {:execute, message}    
+    GenServer.call server, {:execute, message}
   end
 
 
   @doc """
-  Reads events specified in `read_events`, sends them to `subscriber` 
+  Reads events specified in `read_events`, sends them to `subscriber`
   and leaves `subscriber` subscribed per `subscribe` message.
-  
+
   `subscriber` is process that will keep receiving {:on_event, event} messages.
   `read_events` :: Extreme.Messages.ReadStreamEvents
   `subscribe` :: Extreme.Messages.SubscribeToStream
 
-  Returns {:ok, subscription} when subscription is success. 
+  Returns {:ok, subscription} when subscription is success.
   If `stream` is hard deleted `subscriber` will receive message {:extreme, :error, :stream_hard_deleted, stream}
-  If `stream` is soft deleted `subscriber` will receive message {:extreme, :warn, :stream_soft_deleted, stream}. 
+  If `stream` is soft deleted `subscriber` will receive message {:extreme, :warn, :stream_soft_deleted, stream}.
 
   In case of soft deleted stream, new event will recreate stream and it will be sent to `subscriber` as described above
   Hard deleted streams can't be recreated so suggestion is not to handle this message but rather crash when it happens
@@ -46,10 +46,10 @@ defmodule Extreme do
 
   @doc """
   Subscribe `subscriber` to `stream` using `server`.
-  
+
   `subscriber` is process that will keep receiving {:on_event, event} messages.
 
-  Returns {:ok, subscription} when subscription is success. 
+  Returns {:ok, subscription} when subscription is success.
 
   NOTE: If `stream` is hard deleted, `subscriber` will NOT receive any message!
   """
@@ -96,16 +96,16 @@ defmodule Extreme do
     Logger.info "Connecting Extreme to #{host}:#{port}"
     opts = [:binary, active: :once]
     case :gen_tcp.connect(String.to_char_list(host), port, opts) do
-      {:ok, socket} -> 
+      {:ok, socket} ->
         Logger.info "Successfuly connected to EventStore @ #{host}:#{port}"
         :timer.send_after 1_000, :send_ping
         {:ok, socket}
-      _             -> 
+      _             ->
         max_attempts = Keyword.get connection_settings, :max_attempts, :infinity
         reconnect = case max_attempts do
           :infinity -> true
           max when attempt <= max -> true
-          _ -> false 
+          _ -> false
         end
         if reconnect do
           reconnect_delay = Keyword.get connection_settings, :reconnect_delay, 1_000
@@ -122,23 +122,23 @@ defmodule Extreme do
 
   def handle_call({:execute, protobuf_msg}, from, state) do
     {message, correlation_id} = Request.prepare protobuf_msg, state.credentials
-    #Logger.debug "Will execute #{inspect protobuf_msg}"
+    Logger.debug "Will execute #{inspect protobuf_msg}"
     :ok = :gen_tcp.send state.socket, message
     state = put_in state.pending_responses, Map.put(state.pending_responses, correlation_id, from)
     {:noreply, state}
   end
   def handle_call({:read_and_stay_subscribed, subscriber, params}, _from, state) do
     {:ok, subscription} = Extreme.SubscriptionsSupervisor.start_subscription state.subscriptions_sup, subscriber, params
-    #Logger.debug "Subscription is: #{inspect subscription}"
+    Logger.debug "Subscription is: #{inspect subscription}"
     {:reply, {:ok, subscription}, state}
   end
   def handle_call({:subscribe_to, subscriber, stream, resolve_link_tos}, _from, state) do
     {:ok, subscription} = Extreme.SubscriptionsSupervisor.start_subscription state.subscriptions_sup, subscriber, stream, resolve_link_tos
-    #Logger.debug "Subscription is: #{inspect subscription}"
+    Logger.debug "Subscription is: #{inspect subscription}"
     {:reply, {:ok, subscription}, state}
   end
   def handle_call({:subscribe, subscriber, msg}, from, state) do
-    #Logger.debug "Subscribing #{inspect subscriber} with: #{inspect msg}"
+    Logger.debug "Subscribing #{inspect subscriber} with: #{inspect msg}"
     {message, correlation_id} = Request.prepare msg, state.credentials
     :ok = :gen_tcp.send state.socket, message
     state = put_in state.pending_responses, Map.put(state.pending_responses, correlation_id, from)
@@ -161,41 +161,41 @@ defmodule Extreme do
 
   # This package carries message from it's start. Process it and return new `state`
   defp process_package(<<message_length :: 32-unsigned-little-integer, content :: binary>>, %{socket: _socket, received_data: <<>>} = state) do
-    #Logger.debug "Processing package with message_length of: #{message_length}"
+    Logger.debug "Processing package with message_length of: #{message_length}"
     slice_content(message_length, content)
     |> process_content(state)
   end
   # Process package for unfinished message. Process it and return new `state`
   defp process_package(pkg, %{socket: _socket} = state) do
-    #Logger.debug "Processing next package. We need #{state.should_receive} bytes and we have collected #{byte_size(state.received_data)} so far and we have #{byte_size(pkg)} more"
+    Logger.debug "Processing next package. We need #{state.should_receive} bytes and we have collected #{byte_size(state.received_data)} so far and we have #{byte_size(pkg)} more"
     slice_content(state.should_receive, state.received_data <> pkg)
     |> process_content(state)
   end
 
-  defp slice_content(message_length, content) do 
+  defp slice_content(message_length, content) do
     if byte_size(content) < message_length do
-      #Logger.debug "We have unfinished message of length #{message_length}(#{byte_size(content)}): #{inspect content}"
+      Logger.debug "We have unfinished message of length #{message_length}(#{byte_size(content)}): #{inspect content}"
       {:unfinished_message, message_length, content}
     else
       case content do
-        <<message :: binary - size(message_length), next_message :: binary>> -> {message, next_message} 
+        <<message :: binary - size(message_length), next_message :: binary>> -> {message, next_message}
         <<message :: binary - size(message_length)>>                         -> {message, <<>>}
       end
     end
   end
 
-  defp process_content({:unfinished_message, expected_message_length, data}, state) do 
+  defp process_content({:unfinished_message, expected_message_length, data}, state) do
     %{state|should_receive: expected_message_length, received_data: data}
   end
-  defp process_content({message, <<>>}, state) do 
-  #Logger.debug "Processing single message: #{inspect message} and we have already received: #{inspect state.received_data}"
+  defp process_content({message, <<>>}, state) do
+  Logger.debug "Processing single message: #{inspect message} and we have already received: #{inspect state.received_data}"
     state = process_message(message, state)
-    #Logger.debug "After processing content state is #{inspect state}"
+    Logger.debug "After processing content state is #{inspect state}"
     %{state|should_receive: nil, received_data: <<>>}
   end
-  defp process_content({message, rest}, state) do 
-  #Logger.debug "Processing message: #{inspect message}"
-  #Logger.debug "But we have something else in package: #{inspect rest}"
+  defp process_content({message, rest}, state) do
+  Logger.debug "Processing message: #{inspect message}"
+  Logger.debug "But we have something else in package: #{inspect rest}"
     state = process_message message, %{state|should_receive: nil, received_data: <<>>}
     process_package rest, state
   end
@@ -207,12 +207,12 @@ defmodule Extreme do
   end
 
   defp respond({:pong, _correlation_id}, state) do
-    #Logger.debug "#{inspect self} got :pong"
+    Logger.debug "#{inspect self} got :pong"
     :timer.send_after 1_000, :send_ping
     state
   end
   defp respond({:heartbeat_request, correlation_id}, state) do
-    #Logger.debug "#{inspect self} Tick-Tack"
+    Logger.debug "#{inspect self} Tick-Tack"
     message = Request.prepare :heartbeat_response, correlation_id
     :ok = :gen_tcp.send state.socket, message
     %{state|pending_responses: state.pending_responses}
@@ -227,12 +227,12 @@ defmodule Extreme do
   end
 
   defp respond_with(response, correlation_id, state) do
-    #Logger.debug "Responding with response: #{inspect response}"
+    Logger.debug "Responding with response: #{inspect response}"
     case Map.get(state.pending_responses, correlation_id) do
-      nil -> 
+      nil ->
         respond_to_subscription(response, correlation_id, state.subscriptions)
         state
-      from -> 
+      from ->
         :ok = GenServer.reply from, Response.reply(response)
         pending_responses = Map.delete state.pending_responses, correlation_id
         %{state|pending_responses: pending_responses}
@@ -241,7 +241,9 @@ defmodule Extreme do
 
   defp respond_to_subscription(response, correlation_id, subscriptions) do
     case Map.get(subscriptions, correlation_id) do
-      nil -> :ok #Logger.error "Can't find correlation_id #{inspect correlation_id} for response #{inspect response}"
+      nil ->
+        Logger.error "Can't find correlation_id #{inspect correlation_id} for response #{inspect response}"
+        :ok
       subscription -> GenServer.cast subscription, Response.reply(response)
     end
   end

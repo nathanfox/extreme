@@ -11,7 +11,7 @@ defmodule Extreme.Subscription do
   end
 
   def init({connection, subscriber, {stream, from_event_number, per_page, resolve_link_tos, require_master}}) do
-    read_params = %{stream: stream, from_event_number: from_event_number, per_page: per_page, 
+    read_params = %{stream: stream, from_event_number: from_event_number, per_page: per_page,
       resolve_link_tos: resolve_link_tos, require_master: require_master}
     GenServer.cast self, :read_and_stay_subscribed
     {:ok, %{subscriber: subscriber, connection: connection, read_params: read_params, status: :initialized, buffered_messages: [], read_until: -1}}
@@ -24,14 +24,14 @@ defmodule Extreme.Subscription do
 
   def handle_cast(:read_and_stay_subscribed, state) do
     {:ok, subscription_confirmation} = GenServer.call state.connection, {:subscribe, self, subscribe(state.read_params)}
-    Logger.debug "Successfully subscribed to stream #{inspect subscription_confirmation}"
+    Logger.info "Successfully subscribed to stream #{inspect subscription_confirmation}"
     GenServer.cast self, :read_events
     read_until = subscription_confirmation.last_event_number + 1
     {:noreply, %{state | read_until: read_until, status: :reading_events}}
   end
   def handle_cast(:subscribe, state) do
     {:ok, subscription_confirmation} = GenServer.call state.connection, {:subscribe, self, subscribe(state.read_params)}
-    Logger.debug "Successfully subscribed to stream #{inspect subscription_confirmation}"
+    Logger.info "Successfully subscribed to stream #{inspect subscription_confirmation}"
     {:noreply, %{state | status: :subscribed}}
   end
   def handle_cast(:read_events, %{read_params: %{from_event_number: from}, read_until: from}=state) do
@@ -63,7 +63,7 @@ defmodule Extreme.Subscription do
   end
 
   def process_response({:ok, %ExMsg.ReadStreamEventsCompleted{}=response}, state) do
-    Logger.debug "Last read event: #{inspect response.next_event_number - 1}"
+    Logger.info "Last read event: #{inspect response.next_event_number - 1}"
     push_events {:ok, response}, state.subscriber
     send_next_request response, state
   end
@@ -115,9 +115,8 @@ defmodule Extreme.Subscription do
 
   defp subscribe(params) do
     ExMsg.SubscribeToStream.new(
-      event_stream_id: params.stream, 
+      event_stream_id: params.stream,
       resolve_link_tos: params.resolve_link_tos
     )
   end
 end
-

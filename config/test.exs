@@ -2,10 +2,10 @@ use Mix.Config
 
 # EventStore
 config :extreme, :event_store,
-  db_type: :node, 
-  host: "localhost", 
-  port: 1113, 
-  username: "admin", 
+  db_type: :node,
+  host: "localhost",
+  port: 1113,
+  username: "admin",
   password: "changeit",
   reconnect_delay: 2_000, #in ms. Defaults to 1_000
   max_attempts: :infinity
@@ -19,7 +19,7 @@ config :extreme, :event_store,
 #    %{host: "10.10.10.28", port: 2113},
 #    %{host: "10.10.10.30", port: 2113}
 #  ],
-#  username: "admin", 
+#  username: "admin",
 #  password: "changeit",
 #  max_attempts: :infinity #default is :infinity
 
@@ -29,12 +29,11 @@ config :extreme, :event_store,
 #  gossip_timeout: 300, #in ms. Defaults to 1_000
 #  host: "www.google.com",
 #  port: 2113,
-#  username: "admin", 
+#  username: "admin",
 #  password: "changeit",
 #  max_attempts: :infinity #default is :infinity
 
 config :logger, :console,
-  level: :debug,
+  level: :info,
   format: "$time [$level] $metadata$message\n",
   metadata: [:user_id]
-

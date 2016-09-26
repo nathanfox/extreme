@@ -10,7 +10,7 @@ defmodule Extreme.Response do
       :not_authenticated         -> {:error, :not_authenticated, correlation_id}
       :heartbeat_request_command -> {:heartbeat_request, correlation_id}
       :pong                      -> {:pong, correlation_id}
-      response_struct            -> 
+      response_struct            ->
         data = response_struct.decode data
         {auth, correlation_id, data}
     end
@@ -22,7 +22,7 @@ defmodule Extreme.Response do
   def reply(%ExMsg.StreamEventAppeared{} = data), do: {:ok, data}
   def reply(%{result: _} = data), do: {:error, data.result, data}
   def reply({:error, reason}), do: {:error, reason}
-  def reply(1), do: Logger.debug "HEARTBEAT"
+  def reply(1), do: Logger.info "HEARTBEAT"
   def reply(response) do
     Logger.error "Unhandled response: #{inspect response}"
     {:error, :unhandled_response_type, response}
