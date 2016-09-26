@@ -17,7 +17,7 @@ defmodule Extreme.Mixfile do
 
   def application do
     [
-      applications: [:logger, 
+      applications: [:logger, :ex_enum,
         :exprotobuf, :uuid, :gpb, :httpoison, :poison]
     ]
   end
@@ -29,7 +29,8 @@ defmodule Extreme.Mixfile do
       {:exprotobuf, "~> 0.10.2"},
       {:uuid, "~> 1.0" },
       {:ex_doc, ">= 0.11.4", only: [:test]},
-      {:earmark, ">= 0.0.0", only: [:test]}
+      {:earmark, ">= 0.0.0", only: [:test]},
+      {:ex_enum, github: "kenta-aktsk/ex_enum"}
     ]
   end
 
