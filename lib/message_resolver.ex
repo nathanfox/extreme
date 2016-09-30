@@ -20,7 +20,7 @@ defmodule Extreme.MessageResolver do
 	# def encode_cmd(:data_chunk_bulk), do: 0x14
 	# def encode_cmd(:replica_subscription_retry), do: 0x15
 	# def encode_cmd(:replica_subscribed), do: 0x16
- 
+
     # def encode_cmd(:create_stream), do: 0x80
     # def encode_cmd(:create_stream_completed), do: 0x81
 
@@ -59,14 +59,19 @@ defmodule Extreme.MessageResolver do
     def encode_cmd(:unsubscribe_from_stream), do: 0xC3
     def encode_cmd(:subscription_dropped), do: 0xC4
     def encode_cmd(:connect_to_persistent_subscription), do: 0xC5
+    def encode_cmd(Msg.ConnectToPersistentSubscription), do: 0xC5
     def encode_cmd(:persistent_subscription_confirmation), do: 0xC6
+    def decode_cmd(0xC6), do: Msg.PersistentSubscriptionConfirmation
+    def decode_cmd(0xC7), do: Msg.PersistentSubscriptionStreamEventAppeared
     def encode_cmd(:persistent_subscription_stream_event_appeared), do: 0xC7
     def encode_cmd(:create_persistent_subscription), do: 0xC8
     def encode_cmd(:create_persistent_subscription_completed), do: 0xC9
     def encode_cmd(:delete_persistent_subscription), do: 0xCA
     def encode_cmd(:delete_persistent_subscription_completed), do: 0xCB
     def encode_cmd(:persistent_subscription_ack_events), do: 0xCC
+    def encode_cmd(Msg.PersistentSubscriptionAckEvents), do: 0xCC
     def encode_cmd(:persistent_subscription_nak_events), do: 0xCD
+    def encode_cmd(Msg.PersistentSubscriptionNakEvents), do: 0xCD
     def encode_cmd(:update_persistent_subscription), do: 0xCE
     def encode_cmd(:update_persistent_subscription_completed), do: 0xCF
 

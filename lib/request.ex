@@ -13,10 +13,10 @@ defmodule Extreme.Request do
     size = byte_size(res)
     <<size::32-unsigned-little-integer>> <> res
   end
-  def prepare(protobuf_msg, credentials) do
+  def prepare(protobuf_msg, credentials, correlation_id \\ nil) do
     cmd = protobuf_msg.__struct__
     data = protobuf_msg.__struct__.encode protobuf_msg
-    correlation_id = Tools.gen_uuid
+    if correlation_id == nil, do: correlation_id = Tools.gen_uuid
     message = to_binary(cmd, correlation_id, {credentials.user, credentials.pass}, data)
 
     {message, correlation_id}
@@ -25,8 +25,8 @@ defmodule Extreme.Request do
   defp to_binary(cmd, correlation_id, {login, password}, data) do
     login_len = byte_size(login)
     pass_len = byte_size(password)
-    res = <<Extreme.MessageResolver.encode_cmd(cmd), 1>> <> 
-          correlation_id <> 
+    res = <<Extreme.MessageResolver.encode_cmd(cmd), 1>> <>
+          correlation_id <>
           <<login_len::size(8)>>
     res = res <> login <> <<pass_len::size(8)>> <> password <> data
     size = byte_size(res)

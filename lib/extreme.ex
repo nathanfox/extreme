@@ -3,6 +3,9 @@ defmodule Extreme do
   alias Extreme.Request
   require Logger
   alias Extreme.Response
+  alias Extreme.Messages, as: ExMsg
+
+  @timeout Application.get_env(:extreme, :event_store)[:genserver_timeout]
 
   ## Client API
 
@@ -21,7 +24,7 @@ defmodule Extreme do
   - {:error, error_reason, protobuf_message} on failure.
   """
   def execute(server, message) do
-    GenServer.call server, {:execute, message}
+    GenServer.call server, {:execute, message}, @timeout
   end
 
 
@@ -41,7 +44,7 @@ defmodule Extreme do
   Hard deleted streams can't be recreated so suggestion is not to handle this message but rather crash when it happens
   """
   def read_and_stay_subscribed(server, subscriber, stream, from_event_number \\ 0, per_page \\ 4096, resolve_link_tos \\ true, require_master \\ false) do
-    GenServer.call server, {:read_and_stay_subscribed, subscriber, {stream, from_event_number, per_page, resolve_link_tos, require_master}}
+    GenServer.call server, {:read_and_stay_subscribed, subscriber, {stream, from_event_number, per_page, resolve_link_tos, require_master}}, @timeout
   end
 
   @doc """
@@ -54,9 +57,16 @@ defmodule Extreme do
   NOTE: If `stream` is hard deleted, `subscriber` will NOT receive any message!
   """
   def subscribe_to(server, subscriber, stream, resolve_link_tos \\ true) do
-    GenServer.call server, {:subscribe_to, subscriber, stream, resolve_link_tos}
+    GenServer.call server, {:subscribe_to, subscriber, stream, resolve_link_tos}, @timeout
   end
 
+  def start_persistent_subscription(server, subscriber, params = %PersistentSubscriptionParams{}) do
+    GenServer.call server, {:start_persistent_subscription, subscriber, params}, @timeout
+  end
+
+  def send_persistent_subscription_ack(server, correlation_id, ack) do
+    GenServer.cast server, {:persistent_subscription_ack, correlation_id, ack}
+  end
 
   ## Server Callbacks
 
@@ -68,6 +78,13 @@ defmodule Extreme do
     GenServer.cast self, {:connect, connection_settings, 1}
     {:ok, sup} = Extreme.SubscriptionsSupervisor.start_link self
     {:ok, %{socket: nil, pending_responses: %{}, subscriptions: %{}, subscriptions_sup: sup, credentials: %{user: user, pass: pass}, received_data: <<>>, should_receive: nil}}
+  end
+
+  def handle_cast({:persistent_subscription_ack, ack, correlation_id}, state) do
+    {message, _correlation_id} = Request.prepare ack, state.credentials, correlation_id
+    :ok = :gen_tcp.send state.socket, message
+    Logger.debug "sent ack msg, ack: #{inspect ack} correlation_id: #{inspect correlation_id} message: #{inspect message}"
+    {:noreply, state}
   end
 
   def handle_cast({:connect, connection_settings, attempt}, state) do
@@ -127,6 +144,13 @@ defmodule Extreme do
     state = put_in state.pending_responses, Map.put(state.pending_responses, correlation_id, from)
     {:noreply, state}
   end
+  def handle_call({:start_persistent_subscription, subscriber, params}, _from, state) do
+    Logger.debug "Extreme.handle_call :start_persistent_subscription: #{inspect subscriber} params: #{inspect params} state: #{inspect state}"
+    {:ok, subscription} = Extreme.SubscriptionsSupervisor.start_persistent_subscription(state.subscriptions_sup, subscriber, params)
+
+    Logger.debug "Extreme.handle_call :start_persistent_subscription subscription: #{inspect subscription}"
+    {:reply, {:ok, subscription}, state}
+  end
   def handle_call({:read_and_stay_subscribed, subscriber, params}, _from, state) do
     {:ok, subscription} = Extreme.SubscriptionsSupervisor.start_subscription state.subscriptions_sup, subscriber, params
     Logger.debug "Subscription is: #{inspect subscription}"
@@ -134,12 +158,23 @@ defmodule Extreme do
   end
   def handle_call({:subscribe_to, subscriber, stream, resolve_link_tos}, _from, state) do
     {:ok, subscription} = Extreme.SubscriptionsSupervisor.start_subscription state.subscriptions_sup, subscriber, stream, resolve_link_tos
-    Logger.debug "Subscription is: #{inspect subscription}"
+    Logger.debug "Extreme.handle_call :subscribe_to subscription: #{inspect subscription}"
     {:reply, {:ok, subscription}, state}
   end
   def handle_call({:subscribe, subscriber, msg}, from, state) do
-    Logger.debug "Subscribing #{inspect subscriber} with: #{inspect msg}"
+    Logger.debug "Extreme.handle_call :subscribe Subscribing #{inspect subscriber} with: #{inspect msg}"
     {message, correlation_id} = Request.prepare msg, state.credentials
+    Logger.debug "Extreme.handle_call :subscribe Subscribe state before: #{inspect state}"
+    :ok = :gen_tcp.send state.socket, message
+    state = put_in state.pending_responses, Map.put(state.pending_responses, correlation_id, from)
+    state = put_in state.subscriptions, Map.put(state.subscriptions, correlation_id, subscriber)
+    Logger.debug "Extreme.handle_call :subscribe Subscribe state after: #{inspect state}"
+    {:noreply, state}
+  end
+  def handle_call({:persistent_subscription, subscriber, msg}, from, state) do
+    Logger.debug "Extreme.handle_call :persistent_subscription subscriber: #{inspect subscriber} with: #{inspect msg}"
+    {message, correlation_id} = Request.prepare msg, state.credentials
+    Logger.debug "Extreme.handle_call :persistent_subscription Request.prepare return: message: #{inspect message} correlation_id: #{inspect correlation_id}"
     :ok = :gen_tcp.send state.socket, message
     state = put_in state.pending_responses, Map.put(state.pending_responses, correlation_id, from)
     state = put_in state.subscriptions, Map.put(state.subscriptions, correlation_id, subscriber)
@@ -161,7 +196,7 @@ defmodule Extreme do
 
   # This package carries message from it's start. Process it and return new `state`
   defp process_package(<<message_length :: 32-unsigned-little-integer, content :: binary>>, %{socket: _socket, received_data: <<>>} = state) do
-    Logger.debug "Processing package with message_length of: #{message_length}"
+    #Logger.debug "Processing package with message_length of: #{message_length}"
     slice_content(message_length, content)
     |> process_content(state)
   end
@@ -188,9 +223,9 @@ defmodule Extreme do
     %{state|should_receive: expected_message_length, received_data: data}
   end
   defp process_content({message, <<>>}, state) do
-  Logger.debug "Processing single message: #{inspect message} and we have already received: #{inspect state.received_data}"
+  #Logger.debug "Processing single message: #{inspect message} and we have already received: #{inspect state.received_data}"
     state = process_message(message, state)
-    Logger.debug "After processing content state is #{inspect state}"
+    #Logger.debug "After processing content state is #{inspect state}"
     %{state|should_receive: nil, received_data: <<>>}
   end
   defp process_content({message, rest}, state) do
@@ -202,12 +237,13 @@ defmodule Extreme do
 
   defp process_message(message, state) do
     #"Let's finally process whole message: #{inspect message}"
+    if String.slice(message, 0, 1) != <<4>>, do: Logger.debug "Extreme.process_message: message: #{inspect message} parsed message: #{inspect Response.parse(message)} state: #{inspect state}"
     Response.parse(message)
     |> respond(state)
   end
 
   defp respond({:pong, _correlation_id}, state) do
-    Logger.debug "#{inspect self} got :pong"
+    #Logger.debug "#{inspect self} got :pong"
     :timer.send_after 1_000, :send_ping
     state
   end
@@ -222,6 +258,7 @@ defmodule Extreme do
     |> respond_with(correlation_id, state)
   end
   defp respond({_auth, correlation_id, response}, state) do
+    Logger.debug "Extreme.respond correlation_id: #{inspect correlation_id} state: #{inspect state}"
     response
     |> respond_with(correlation_id, state)
   end
@@ -240,11 +277,20 @@ defmodule Extreme do
   end
 
   defp respond_to_subscription(response, correlation_id, subscriptions) do
+    Logger.debug "Extreme.respond_to_subscription response: #{inspect response} correlation_id: #{inspect correlation_id} subscriptions: #{inspect subscriptions}"
     case Map.get(subscriptions, correlation_id) do
       nil ->
         Logger.error "Can't find correlation_id #{inspect correlation_id} for response #{inspect response}"
         :ok
-      subscription -> GenServer.cast subscription, Response.reply(response)
+      subscription ->
+        #Logger.debug "Extreme.respond_to_subscription, subscription: #{inspect subscription} #{inspect Response.reply(response)}"
+        case Response.reply(response) do
+          {:ok, %ExMsg.PersistentSubscriptionStreamEventAppeared{}} = reply ->
+            Logger.debug "case %ExMsg.PersistentSubscriptionStreamEventAppeared{} = reply, reply: #{inspect reply}"
+            GenServer.cast subscription, Tuple.append(reply, correlation_id)
+          reply ->
+            GenServer.cast subscription, reply
+        end
     end
   end
 

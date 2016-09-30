@@ -31,11 +31,11 @@ After you are done, run `mix deps.get` in your shell to fetch and compile Extrem
 
 ## USAGE
 
-The best way to understand how adapter should be used is by investigating `test/extreme_test.exs` file, 
+The best way to understand how adapter should be used is by investigating `test/extreme_test.exs` file,
 but we'll try to explain some details in here as well.
 
-Extreme is implemented using GenServer and is OTP compatible. 
-If client is disconnected from server we are not trying to reconnect, instead you should rely on your supervisor. 
+Extreme is implemented using GenServer and is OTP compatible.
+If client is disconnected from server we are not trying to reconnect, instead you should rely on your supervisor.
 For example:
 
 ```elixir
@@ -47,7 +47,7 @@ defmodule MyApp.Supervisor do
   end
 
   @event_store MyApp.EventStore
-  
+
   def init(:ok) do
     event_store_settings = Application.get_env :my_app, :event_store
 
@@ -78,10 +78,10 @@ Example for connecting to single node:
 
 ```elixir
 config :extreme, :event_store,
-  db_type: :node, 
-  host: "localhost", 
-  port: 1113, 
-  username: "admin", 
+  db_type: :node,
+  host: "localhost",
+  port: 1113,
+  username: "admin",
   password: "changeit",
   reconnect_delay: 2_000,
   max_attempts: :infinity
@@ -105,7 +105,7 @@ config :extreme, :event_store,
     %{host: "10.10.10.28", port: 2113},
     %{host: "10.10.10.30", port: 2113}
   ],
-  username: "admin", 
+  username: "admin",
   password: "changeit"
 ```
 
@@ -119,13 +119,13 @@ Example of connection to cluster via DNS lookup
 
 ```elixir
 config :extreme, :event_store,
- db_type: :cluster_dns, 
+ db_type: :cluster_dns,
  gossip_timeout: 300,
  host: "es-cluster.example.com", # accepts char list too, this whould be multy A record host enrty in your nameserver
  port: 2113, # the external gossip port
- username: "admin", 
+ username: "admin",
  password: "changeit",
- max_attempts: :infinity 
+ max_attempts: :infinity
 ```
 
 When `cluster` mode is used, adapter goes thru `nodes` list and tries to gossip with node one after another
@@ -149,8 +149,8 @@ Once client is disconnected from EventStore, supervisor should respawn it and co
 
 ### Communication
 
-EventStore uses ProtoBuf for taking requests and sending responses back. 
-We are using [exprotobuf](https://github.com/bitwalker/exprotobuf) to deal with them. 
+EventStore uses ProtoBuf for taking requests and sending responses back.
+We are using [exprotobuf](https://github.com/bitwalker/exprotobuf) to deal with them.
 List and specification of supported protobuf messages can be found in `include/event_store.proto` file.
 
 Instead of wrapping each and every request in elixir function, we are using `execute/2` function that takes server pid and request message:
@@ -165,7 +165,7 @@ where `write_events` can be helper function like:
   alias Extreme.Messages, as: ExMsg
 
   defp write_events(stream \\ "people", events \\ [%PersonCreated{name: "Pera Peric"}, %PersonChangedName{name: "Zika"}]) do
-    proto_events = Enum.map(events, fn event -> 
+    proto_events = Enum.map(events, fn event ->
       ExMsg.NewEvent.new(
         event_id: Extreme.Tools.gen_uuid(),
         event_type: to_string(event.__struct__),
@@ -175,7 +175,7 @@ where `write_events` can be helper function like:
         meta: ""
       ) end)
     ExMsg.WriteEvents.new(
-      event_stream_id: stream, 
+      event_stream_id: stream,
       expected_version: -2,
       events: proto_events,
       require_master: false
@@ -184,15 +184,15 @@ where `write_events` can be helper function like:
 ```
 
 This way you can fine tune your requests, i.e. choose your serialization. We are using erlang serialization in this case
-`data: :erlang.term_to_binary(event)`, but you can do whatever suites you. 
-For more information about protobuf messages EventStore uses, 
-take a look at their [documentation](http://docs.geteventstore.com) or for common use cases 
+`data: :erlang.term_to_binary(event)`, but you can do whatever suites you.
+For more information about protobuf messages EventStore uses,
+take a look at their [documentation](http://docs.geteventstore.com) or for common use cases
 you can check `test/extreme_test.exs` file.
 
 
 ### Subscriptions
 
-`Extreme.subscribe_to/3` function is used to get notified on new events on particular stream. 
+`Extreme.subscribe_to/3` function is used to get notified on new events on particular stream.
 This way subscriber, in next example `self`, will get message `{:on_event, push_message}` when new event is added to stream
 _people_.
 
@@ -235,7 +235,7 @@ defmodule MyApp.StreamSubscriber
   end
   def handle_info({:on_event, push}, state) do
     push.event.data
-    |> :erlang.binary_to_term 
+    |> :erlang.binary_to_term
     |> process_event
     event_number = push.link.event_number
     :ok = update_last_event state.stream, event_number
@@ -248,7 +248,7 @@ defmodule MyApp.StreamSubscriber
 end
 ```
 
-This way unprocessed events will be sent by Extreme, using `{:on_event, push}` message. 
+This way unprocessed events will be sent by Extreme, using `{:on_event, push}` message.
 After all persisted messages are sent, new messages will be sent the same way as they arrive to stream.
 
 If you subscribe to non existing stream you'll receive message {:extreme, severity, problem, stream} where severity can be either `:error` (for subscription on hard deleted stream) or `:warn` (for subscription on non existing or soft deleted stream). Problem is explanation of problem (i.e. :stream_hard_deleted). So in your receiver you can either have catch all `handle_info(_message, _state)` or you can handle such message:
@@ -260,6 +260,40 @@ def handle_info({:extreme, _, problem, stream}=message, state) do
 end
 ```
 
+## Persistent subscriptions (competing consumers)
+
+Please note:
+* Currently this is no unit testing.
+* The persistent subscription code has gone through basic use testing.
+* At this point, use this feature with caution. 
+
+The file sample_subscribe.exs contains a sample module to use for setting up a subscription.
+
+```elixir
+defmodule SampleSubscribe do
+  use GenServer
+  require Logger
+
+  def start_link(:persub, server, stream, group_name, buffer_size) do
+    GenServer.start_link __MODULE__, {:persub, server, stream, group_name, buffer_size}
+  end
+
+  def init({:persub, server, stream, group_name, buffer_size}) do
+    Extreme.start_persistent_subscription(server, self, %PersistentSubscriptionParams{stream: stream, group_name: group_name, buffer_size: buffer_size})
+    {:ok, []}
+  end
+
+  def handle_call({:on_persistent_event, e}, _from, state) do
+
+    # Implement handling for event.
+
+    {:reply, {:ok, %Extreme.Messages.PersistentSubscriptionAckEvents{}}, state}
+    # If a message is not successfully processed then a Nak can be sent.
+    # {:reply, {:ok, %Extreme.Messages.PersistentSubscriptionNakEvents{ action: :Retry}}, state}
+    # action can be one of :Unknown, :Park, :Retry, :Skip, or :Stop
+  end
+end
+```
 
 ## Contributing
 
